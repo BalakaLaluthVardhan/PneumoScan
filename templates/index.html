@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PneumoScan AI - Clinical Chest X-ray Classification & Localization</title>
+    <!-- Google Fonts: Inter for formal clinical typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <header class="app-header">
+        <div class="header-container">
+            <div class="brand">
+                <svg class="brand-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+                </svg>
+                <span class="brand-name">PneumoScan <span class="brand-highlight">AI</span></span>
+            </div>
+            <div class="clinical-badge">Clinical Support System</div>
+        </div>
+    </header>
+
+    <main class="main-container">
+        <!-- Banner / Intro -->
+        <section class="intro-section">
+            <h1>Chest X-ray Diagnostic Support</h1>
+            <p>Upload a chest radiograph to evaluate the probability of pneumonia. The system utilizes a fine-tuned DenseNet deep neural network model and generates a Grad-CAM localized spatial visualization map.</p>
+        </section>
+
+        <div class="dashboard-grid">
+            <!-- Left Panel: Upload and Settings -->
+            <section class="card upload-card">
+                <div class="card-header">
+                    <svg class="card-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="17 8 12 3 7 8"/>
+                        <line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                    <h2>Upload Chest X-ray</h2>
+                </div>
+                
+                <div class="upload-dropzone" id="dropzone">
+                    <input type="file" id="file-input" accept="image/png, image/jpeg, image/jpg" style="display: none;">
+                    <div class="dropzone-prompt">
+                        <svg class="upload-cloud-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M20.8 17.06a7.33 7.33 0 0 0-4.14-11.45 8.7 8.7 0 0 0-16.14 4.54A7.47 7.47 0 0 0 3.2 20h15a5.8 5.8 0 0 0 2.6-11.94z"/>
+                        </svg>
+                        <p class="primary-prompt">Drag and drop chest X-ray here</p>
+                        <p class="secondary-prompt">or <span class="browse-link">browse your files</span></p>
+                        <span class="file-limits">Supports JPEG, PNG (Min. 320x320 px)</span>
+                    </div>
+                    
+                    <!-- File Selected State -->
+                    <div class="dropzone-selected" id="selected-state" style="display: none;">
+                        <svg class="file-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                            <circle cx="8.5" cy="8.5" r="1.5"/>
+                            <polyline points="21 15 16 10 5 21"/>
+                        </svg>
+                        <p id="selected-file-name" class="file-name">filename.png</p>
+                        <button type="button" class="btn-text remove-file-btn" id="remove-btn">Remove file</button>
+                    </div>
+                </div>
+
+                <button class="btn btn-primary btn-block" id="analyze-btn" disabled>
+                    <span class="btn-text">Execute Diagnostic Analysis</span>
+                    <span class="spinner" id="btn-spinner" style="display: none;"></span>
+                </button>
+            </section>
+
+            <!-- Right Panel: Results (Initially empty/placeholder) -->
+            <section class="card results-card" id="results-panel">
+                <!-- Initial State Placeholder -->
+                <div class="results-placeholder" id="results-placeholder">
+                    <svg class="placeholder-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="12" y1="16" x2="12" y2="12"/>
+                        <line x1="12" y1="8" x2="12.01" y2="8"/>
+                    </svg>
+                    <h3>Awaiting Radiograph Analysis</h3>
+                    <p>Load and run a chest X-ray image to generate clinical predictions, probability metrics, and localization maps.</p>
+                </div>
+
+                <!-- Analysis Success State -->
+                <div class="results-content" id="results-content" style="display: none;">
+                    <div class="card-header">
+                        <svg class="card-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                            <line x1="16" y1="13" x2="8" y2="13"/>
+                            <line x1="16" y1="17" x2="8" y2="17"/>
+                            <polyline points="10 9 9 9 8 9"/>
+                        </svg>
+                        <h2>Analysis Results</h2>
+                    </div>
+
+                    <!-- Diagnosis Alert Box -->
+                    <div class="alert-box" id="diagnosis-alert">
+                        <div class="alert-info">
+                            <span class="alert-label">DIAGNOSIS:</span>
+                            <span class="alert-value" id="diagnosis-label">NORMAL</span>
+                        </div>
+                    </div>
+
+                    <!-- Metric Container -->
+                    <div class="metrics-grid">
+                        <div class="metric-card">
+                            <span class="metric-title">Model Confidence</span>
+                            <div class="progress-bar-container">
+                                <div class="progress-bar" id="confidence-bar" style="width: 0%;"></div>
+                            </div>
+                            <span class="metric-value" id="confidence-value">0.00%</span>
+                        </div>
+                    </div>
+
+                    <!-- Image Viewer Container (Original vs Heatmap Comparison) -->
+                    <div class="viewer-section">
+                        <div class="viewer-header">
+                            <h3>Grad-CAM Spatial Localization Map</h3>
+                            <span class="slider-hint">Drag handle to compare original X-ray and localization map</span>
+                        </div>
+                        
+                        <!-- The comparison slider component -->
+                        <div class="comparison-slider" id="comparison-slider">
+                            <!-- Background Image (Original X-Ray) -->
+                            <img src="" alt="Original X-ray" id="img-original" class="slider-image">
+                            
+                            <!-- Overlay Image Container (Grad-CAM Heatmap) -->
+                            <div class="overlay-container" id="overlay-container">
+                                <img src="" alt="Grad-CAM Heatmap" id="img-heatmap" class="slider-image">
+                            </div>
+                            
+                            <!-- Draggable Slider Handle -->
+                            <div class="slider-handle" id="slider-handle">
+                                <div class="handle-line"></div>
+                                <div class="handle-button">
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <polyline points="8 18 2 12 8 6"/>
+                                        <polyline points="16 6 22 12 16 18"/>
+                                    </svg>
+                                </div>
+                                <div class="handle-line"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- Clinical Notes & Disclaimer -->
+        <section class="clinical-notes-section">
+            <div class="clinical-notes-card">
+                <h3>Clinical & Model Interpretation Notes</h3>
+                <div class="notes-grid">
+                    <div class="note-item">
+                        <h4>Grad-CAM Localization (Gradient-weighted Class Activation Mapping)</h4>
+                        <p>The localization map overlays highlighted heat signatures on the image. Regions in red and orange represent features that heavily contributed to the classification of Pneumonia. Blue and green zones indicate lower activation levels.</p>
+                    </div>
+                    <div class="note-item">
+                        <h4>DenseNet Neural Network Engine</h4>
+                        <p>The analysis runs on a fine-tuned DenseNet-121 architecture. This network leverages dense connectivity blocks where each layer connects to all subsequent layers, facilitating accurate feature extraction in radiography patterns.</p>
+                    </div>
+                </div>
+                
+                <div class="disclaimer-banner">
+                    <svg class="disclaimer-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                        <line x1="12" y1="9" x2="12" y2="13"/>
+                        <line x1="12" y1="17" x2="12.01" y2="17"/>
+                    </svg>
+                    <div class="disclaimer-text">
+                        <strong>Clinical Disclaimer:</strong> This tool is an automated auxiliary diagnostic reference system. It is designed to assist and support workflow prioritization. It is <strong>not</strong> a substitute for professional radiological diagnosis, clinical evaluation, or doctor-patient consultation.
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="app-footer">
+        <div class="footer-container">
+            <p>&copy; 2026 PneumoScan AI Clinical Systems. All rights reserved.</p>
+            <p class="footer-meta">Model version: DenseNet-121-V1-FineTuned | Environment: Local Inference Engine</p>
+        </div>
+    </footer>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
