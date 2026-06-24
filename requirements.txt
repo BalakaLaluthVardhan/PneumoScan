@@ -1,7 +1,7 @@
 flask
 tflite-runtime
 opencv-python-headless
-numpy
+numpy<2.0.0
 matplotlib
 pillow
 gunicorn
