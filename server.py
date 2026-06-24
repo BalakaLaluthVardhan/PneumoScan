@@ -86,8 +86,11 @@ if any(x is None for x in [preds_idx, conv_idx, dense_idx, relu_idx]):
 # Chest X-ray Image Validation Heuristic
 def validate_chest_xray(img_bgr):
     """
-    Validates if the uploaded image is likely a chest X-ray based on aspect ratio,
-    color saturation, brightness, contrast, and corner background properties.
+    Validates if the uploaded image is likely a chest X-ray based on:
+    1. Basic structure (aspect ratio, brightness, contrast, corner shading)
+    2. Explicit QR code detection
+    3. Grayscale mid-tone distribution (filters out QR codes, text documents, diagrams)
+    4. Bilateral symmetry (filters out faces, cars, single limbs, side profiles, etc.)
     """
     if img_bgr is None:
         return False, "Invalid image data."
@@ -104,11 +107,8 @@ def validate_chest_xray(img_bgr):
     hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
     
     # 2. Color Saturation Check
-    # Saturation channel is index 1 in HSV
     sat_channel = hsv[:, :, 1]
     mean_sat = np.mean(sat_channel)
-    # A true grayscale image has 0 saturation. Slightly tinted scans might have low saturation.
-    # Color logos, landscapes, faces have high saturation.
     if mean_sat > 25:
         return False, "The uploaded image contains color. Chest X-rays must be grayscale."
 
@@ -123,7 +123,6 @@ def validate_chest_xray(img_bgr):
         return False, "The image has insufficient contrast to be a valid chest X-ray."
 
     # 5. Top Corners Background Check
-    # Top-left and top-right corners of a chest X-ray are usually dark background.
     corner_h = max(1, int(h * 0.1))
     corner_w = max(1, int(w * 0.1))
     tl_corner = gray[0:corner_h, 0:corner_w]
@@ -132,10 +131,31 @@ def validate_chest_xray(img_bgr):
     mean_tl = np.mean(tl_corner)
     mean_tr = np.mean(tr_corner)
     
-    # If both top corners are very bright (e.g. > 160), it's likely a logo, document,
-    # or photo with a bright background.
     if mean_tl > 160 and mean_tr > 160:
         return False, "The image background is too bright. Chest X-rays typically have a dark background."
+
+    # 6. Explicit QR Code Detection
+    qr_detector = cv2.QRCodeDetector()
+    retval, points, _ = qr_detector.detectAndDecode(gray)
+    if retval or (points is not None and len(points) > 0):
+        return False, "The uploaded image contains a QR code, which is not a valid chest X-ray."
+
+    # 7. Grayscale Mid-tone Density Check (Filters out text pages, high-contrast diagrams, and QR codes)
+    # Radiographs have continuous mid-tones. Text and QR codes have almost purely black & white pixels.
+    mid_tone_pixels = np.sum((gray >= 40) & (gray <= 215))
+    mid_tone_fraction = mid_tone_pixels / gray.size
+    if mid_tone_fraction < 0.30:
+        return False, "The image does not have the expected grayscale distribution of a chest radiograph."
+
+    # 8. Bilateral Symmetry Check (Filters out faces, animals, single limbs, side-views, landscapes, etc.)
+    sym_img = cv2.resize(gray, (128, 128))
+    left_half = sym_img[:, :64]
+    right_half = sym_img[:, 64:]
+    right_half_flipped = cv2.flip(right_half, 1)
+    
+    corr = np.corrcoef(left_half.flat, right_half_flipped.flat)[0, 1]
+    if np.isnan(corr) or corr < 0.55:
+        return False, "The image lacks the bilateral symmetry characteristic of a frontal chest X-ray."
 
     return True, ""
 
