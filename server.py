@@ -83,6 +83,62 @@ for detail in output_details:
 if any(x is None for x in [preds_idx, conv_idx, dense_idx, relu_idx]):
     raise RuntimeError(f"Could not map all TFLite outputs! preds={preds_idx}, conv={conv_idx}, dense={dense_idx}, relu={relu_idx}")
 
+# Chest X-ray Image Validation Heuristic
+def validate_chest_xray(img_bgr):
+    """
+    Validates if the uploaded image is likely a chest X-ray based on aspect ratio,
+    color saturation, brightness, contrast, and corner background properties.
+    """
+    if img_bgr is None:
+        return False, "Invalid image data."
+
+    h, w, _ = img_bgr.shape
+    
+    # 1. Aspect Ratio Check
+    aspect_ratio = w / h
+    if aspect_ratio < 0.5 or aspect_ratio > 2.0:
+        return False, "Invalid image aspect ratio. Chest X-rays should be roughly square (aspect ratio between 0.5 and 2.0)."
+
+    # Convert to grayscale and HSV for analysis
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+    
+    # 2. Color Saturation Check
+    # Saturation channel is index 1 in HSV
+    sat_channel = hsv[:, :, 1]
+    mean_sat = np.mean(sat_channel)
+    # A true grayscale image has 0 saturation. Slightly tinted scans might have low saturation.
+    # Color logos, landscapes, faces have high saturation.
+    if mean_sat > 25:
+        return False, "The uploaded image contains color. Chest X-rays must be grayscale."
+
+    # 3. Brightness Range Check
+    mean_brightness = np.mean(gray)
+    if mean_brightness < 15 or mean_brightness > 220:
+        return False, "The image is too dark or too bright to be a valid chest X-ray."
+
+    # 4. Contrast Check (Standard deviation of pixel values)
+    std_brightness = np.std(gray)
+    if std_brightness < 15:
+        return False, "The image has insufficient contrast to be a valid chest X-ray."
+
+    # 5. Top Corners Background Check
+    # Top-left and top-right corners of a chest X-ray are usually dark background.
+    corner_h = max(1, int(h * 0.1))
+    corner_w = max(1, int(w * 0.1))
+    tl_corner = gray[0:corner_h, 0:corner_w]
+    tr_corner = gray[0:corner_h, w-corner_w:w]
+    
+    mean_tl = np.mean(tl_corner)
+    mean_tr = np.mean(tr_corner)
+    
+    # If both top corners are very bright (e.g. > 160), it's likely a logo, document,
+    # or photo with a bright background.
+    if mean_tl > 160 and mean_tr > 160:
+        return False, "The image background is too bright. Chest X-rays typically have a dark background."
+
+    return True, ""
+
 # CLAHE Preprocessing (Matching original app.py)
 def apply_clahe(img):
     img = img.astype('uint8')
@@ -128,6 +184,14 @@ def predict():
         
         if img_bgr is None:
             return jsonify({'error': 'Invalid image file format'}), 400
+
+        # Validate that the image is a chest X-ray
+        is_valid, error_msg = validate_chest_xray(img_bgr)
+        if not is_valid:
+            return jsonify({
+                'success': False,
+                'error': error_msg
+            }), 400
 
         # Convert to RGB to match Pillow output used in original training/inference
         img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)

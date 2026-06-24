@@ -480,6 +480,7 @@ body {
     overflow: hidden;
     user-select: none;
     box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);
+    container-type: inline-size;
 }
 
 .slider-image {
@@ -512,7 +513,7 @@ body {
     position: absolute;
     left: 0;
     top: 0;
-    width: 100%;
+    width: 100cqw;
     height: 100%;
     object-fit: contain;
 }

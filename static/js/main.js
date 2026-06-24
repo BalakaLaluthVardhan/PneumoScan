@@ -213,6 +213,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateSliderPosition(percentage) {
         handle.style.left = `${percentage}%`;
         overlay.style.width = `${percentage}%`;
+        imgHeatmap.style.width = `${slider.offsetWidth}px`;
     }
 
     // Mouse Listeners
@@ -239,5 +240,13 @@ document.addEventListener('DOMContentLoaded', () => {
         isDraggingSlider = true;
         moveSlider(e.clientX);
         isDraggingSlider = false;
+    });
+
+    // Adjust overlay image width on window resize to maintain perfect alignment
+    window.addEventListener('resize', () => {
+        if (resultsContent.style.display === 'block') {
+            const currentPercentage = parseFloat(handle.style.left) || 50;
+            updateSliderPosition(currentPercentage);
+        }
     });
 });
