@@ -16,7 +16,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the application files
 COPY server.py .
-COPY best_densenet_model.keras .
+COPY best_densenet_model.tflite .
+COPY gradcam_weights.npz .
 COPY templates/ templates/
 COPY static/ static/
 

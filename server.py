@@ -2,22 +2,86 @@ import os
 import base64
 import numpy as np
 import cv2
-import tensorflow as tf
 from matplotlib import colormaps
-from PIL import Image
 from flask import Flask, request, jsonify, render_template
+
+# Try loading tflite-runtime, fallback to tensorflow.lite if running in developer env
+try:
+    import tflite_runtime.interpreter as tflite
+except ImportError:
+    import tensorflow.lite as tflite
 
 # CONFIG
 IMG_SIZE = (320, 320)
-MODEL_PATH = "best_densenet_model.keras"
-LAST_CONV_LAYER = "conv5_block16_concat"
+MODEL_PATH = "best_densenet_model.tflite"
+WEIGHTS_PATH = "gradcam_weights.npz"
 
 app = Flask(__name__)
 
-# Load Keras Model once at startup
-print("Loading Keras model...")
-model = tf.keras.models.load_model(MODEL_PATH)
+# Load TFLite model at startup
+print("Loading TFLite model...")
+interpreter = tflite.Interpreter(model_path=MODEL_PATH)
+interpreter.allocate_tensors()
 print("Model loaded successfully!")
+
+# Get input and output details
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
+
+# Load saved Grad-CAM weights for fast mathematical execution
+print("Loading Grad-CAM weights...")
+weights = np.load(WEIGHTS_PATH)
+W1 = weights['W1']
+W2 = weights['W2']
+scale_bn = weights['scale_bn']
+print("Weights loaded successfully!")
+
+# Dynamically map TFLite outputs to avoid dependency on order/names
+preds_idx = None
+conv_idx = None
+dense_idx = None
+relu_idx = None
+
+# 1. Try suffix matching based on Keras outputs order (StatefulPartitionedCall_1:X -> X)
+for detail in output_details:
+    name = detail['name']
+    idx = detail['index']
+    parts = name.split(':')
+    if len(parts) > 1 and parts[-1].isdigit():
+        k_idx = int(parts[-1])
+        if k_idx == 0: preds_idx = idx
+        elif k_idx == 1: conv_idx = idx
+        elif k_idx == 2: dense_idx = idx
+        elif k_idx == 3: relu_idx = idx
+
+# 2. Fallback matching by shape and name keywords if suffix matching is incomplete
+for detail in output_details:
+    idx = detail['index']
+    shape = list(detail['shape'])
+    name = detail['name'].lower()
+    
+    if shape == [1, 1] and preds_idx is None:
+        preds_idx = idx
+    elif shape == [1, 128] and dense_idx is None:
+        dense_idx = idx
+    elif shape == [1, 10, 10, 1024]:
+        if conv_idx is None and ('concat' in name or ':1' in name):
+            conv_idx = idx
+        elif relu_idx is None and ('relu' in name or ':3' in name):
+            relu_idx = idx
+
+# 3. Secondary fallback for conv/relu shape mismatch
+for detail in output_details:
+    idx = detail['index']
+    shape = list(detail['shape'])
+    if shape == [1, 10, 10, 1024]:
+        if idx != conv_idx and relu_idx is None:
+            relu_idx = idx
+        elif idx != relu_idx and conv_idx is None:
+            conv_idx = idx
+
+if any(x is None for x in [preds_idx, conv_idx, dense_idx, relu_idx]):
+    raise RuntimeError(f"Could not map all TFLite outputs! preds={preds_idx}, conv={conv_idx}, dense={dense_idx}, relu={relu_idx}")
 
 # CLAHE Preprocessing (Matching original app.py)
 def apply_clahe(img):
@@ -43,30 +107,6 @@ def preprocess(img):
         img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
     img = apply_clahe(img)
     return np.expand_dims(img, axis=0)
-
-# Grad-CAM Heatmap Generation (Matching original app.py)
-def make_gradcam_heatmap(img_array, model, last_conv_layer_name):
-    grad_model = tf.keras.models.Model(
-        [model.inputs],
-        [model.get_layer(last_conv_layer_name).output, model.output]
-    )
-
-    with tf.GradientTape() as tape:
-        conv_output, preds = grad_model(img_array)
-        loss = preds[0]
-
-    grads = tape.gradient(loss, conv_output)
-    pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
-
-    conv_output = conv_output[0]
-    heatmap = conv_output @ pooled_grads[..., tf.newaxis]
-    heatmap = tf.squeeze(heatmap)
-
-    heatmap = tf.maximum(heatmap, 0)
-    if tf.reduce_max(heatmap) != 0:
-        heatmap /= tf.reduce_max(heatmap)
-
-    return heatmap.numpy()
 
 @app.route('/')
 def index():
@@ -98,13 +138,38 @@ def predict():
         # Run preprocessing
         img_array = preprocess(img_rgb)
 
-        # Model Predict
-        pred_val = model.predict(img_array)[0][0]
-        confidence = float(pred_val)
+        # Run TFLite inference
+        interpreter.set_tensor(input_details[0]['index'], img_array.astype(np.float32))
+        interpreter.invoke()
+
+        # Extract output tensors
+        pred_val = float(interpreter.get_tensor(preds_idx)[0][0])
+        conv_out = interpreter.get_tensor(conv_idx)
+        dense_out = interpreter.get_tensor(dense_idx)
+        relu_out = interpreter.get_tensor(relu_idx)
+
+        confidence = pred_val
         label = "PNEUMONIA" if confidence >= 0.5 else "NORMAL"
 
-        # Generate Grad-CAM Heatmap
-        heatmap = make_gradcam_heatmap(img_array, model, LAST_CONV_LAYER)
+        # Generate Grad-CAM Heatmap mathematically via NumPy
+        # 1. Compute active nodes in the first Dense layer
+        d1_active = (dense_out > 0).astype(np.float32)
+        # 2. Backpropagate Dense layers: d(logit) / d(GAP_output)
+        dlogit_dg = np.sum(W1 * (W2.T * d1_active), axis=1)
+        # 3. Apply active mask from Conv block ReLU
+        x_bn_active = (relu_out > 0).astype(np.float32)
+        # 4. Multiply with BN scale parameters
+        grads_manual = dlogit_dg * scale_bn * x_bn_active
+        # 5. Global Average Pooling of gradients
+        pooled_grads = np.mean(grads_manual, axis=(0, 1, 2))
+        
+        # 6. Apply weights to conv feature maps
+        heatmap = conv_out[0] @ pooled_grads[..., np.newaxis]
+        heatmap = heatmap.squeeze()
+        heatmap = np.maximum(heatmap, 0)
+        if np.max(heatmap) != 0:
+            heatmap /= np.max(heatmap)
+            
         heatmap = np.uint8(255 * heatmap)
 
         # Apply Jet Color Map

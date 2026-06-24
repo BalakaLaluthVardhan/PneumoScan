@@ -119,9 +119,16 @@ document.addEventListener('DOMContentLoaded', () => {
             method: 'POST',
             body: formData
         })
-        .then(response => {
+        .then(async response => {
             if (!response.ok) {
-                return response.json().then(err => { throw new Error(err.error || 'Server error'); });
+                let errorMsg = `Server returned status ${response.status}`;
+                try {
+                    const err = await response.json();
+                    errorMsg = err.error || errorMsg;
+                } catch (e) {
+                    errorMsg = `${response.status} ${response.statusText || 'Server Error'}`;
+                }
+                throw new Error(errorMsg);
             }
             return response.json();
         })
